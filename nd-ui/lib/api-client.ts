@@ -1,156 +1,104 @@
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-
-type FetchInit = RequestInit & { token?: string };
-
-export type AuthUser = {
-  id: string;
-  email: string;
-  name: string;
-  role: "admin" | "manager" | "viewer";
-};
-
-export type Director = {
-  id: string;
-  fullName: string;
-  email?: string;
-  phone?: string;
-};
-
-export type Company = {
-  id: string;
-  name: string;
-  uen: string;
-  sector?: string;
-  nomineeDirector?: Director | null;
-};
-
-export type ObligationStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "overdue";
-
-export type Obligation = {
-  id: string;
-  title: string;
-  description?: string;
-  category?: string;
-  dueDate: string;
-  status: ObligationStatus;
-  company: Company;
-  director?: Director | null;
-};
-
-export type AuthResponse = {
-  accessToken: string;
-  user: AuthUser;
-};
-
-export type LoginPayload = { email: string; password: string };
-export type RegisterPayload = {
-  email: string;
-  password: string;
-  name: string;
-  role?: AuthUser["role"];
-};
-export type CreateCompanyPayload = {
-  name: string;
-  uen: string;
-  sector?: string;
-  nomineeDirectorId?: string;
-};
-export type CreateDirectorPayload = {
-  fullName: string;
-  email?: string;
-  phone?: string;
-};
-export type CreateObligationPayload = {
-  title: string;
-  description?: string;
-  category?: string;
-  dueDate: string;
-  companyId: string;
-  directorId?: string;
-  status?: ObligationStatus;
-};
-export type UpdateObligationPayload = Partial<
-  Omit<CreateObligationPayload, "companyId"> & { companyId?: string }
-> & { status?: ObligationStatus };
-
-async function apiRequest<T>(path: string, init: FetchInit = {}): Promise<T> {
-  const { token, ...options } = init;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
-
-  const text = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    payload = text;
-  }
-
-  if (!response.ok) {
-    const message =
-      (payload as { message?: string })?.message ?? "Request failed";
-    throw new Error(message);
-  }
-
-  return payload as T;
-}
+import { supabase } from './supabase';
 
 export const apiClient = {
-  login: (payload: LoginPayload) =>
-    apiRequest<AuthResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  register: (payload: RegisterPayload) =>
-    apiRequest<AuthResponse>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  getCompanies: (token: string) =>
-    apiRequest<Company[]>("/companies", { token }),
-  createCompany: (token: string, payload: CreateCompanyPayload) =>
-    apiRequest<Company>("/companies", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      token,
-    }),
-  getDirectors: (token: string) =>
-    apiRequest<Director[]>("/directors", { token }),
-  createDirector: (token: string, payload: CreateDirectorPayload) =>
-    apiRequest<Director>("/directors", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      token,
-    }),
-  getObligations: (token: string) =>
-    apiRequest<Obligation[]>("/obligations", { token }),
-  createObligation: (token: string, payload: CreateObligationPayload) =>
-    apiRequest<Obligation>("/obligations", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      token,
-    }),
-  updateObligation: (
-    token: string,
-    id: string,
-    payload: UpdateObligationPayload,
-  ) =>
-    apiRequest<Obligation>(`/obligations/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-      token,
-    }),
+  async getDashboardStats() {
+    const companies = await supabase.from('companies').select('*', { count: 'exact', head: true });
+    const obligations = await supabase.from('legal_obligations').select('*', { count: 'exact', head: true });
+    const overdue = await supabase
+      .from('legal_obligations')
+      .select('*', { count: 'exact', head: true })
+      .lt('statutory_due_date', new Date().toISOString())
+      .in('status', ['open', 'in_progress']);
+    if (companies.error) throw companies.error;
+    if (obligations.error) throw obligations.error;
+    if (overdue.error) throw overdue.error;
+    return {
+      companies: companies.count ?? 0,
+      obligations: obligations.count ?? 0,
+      overdue: overdue.count ?? 0,
+    };
+  },
+
+  async getRecentActions(limit = 10) {
+    const { data, error } = await supabase
+      .from('actions_log')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data;
+  },
+
+  async getUpcomingDeadlines(limit = 5) {
+    const { data, error } = await supabase
+      .from('legal_obligations')
+      .select('*')
+      .gte('statutory_due_date', new Date().toISOString())
+      .order('statutory_due_date', { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return data;
+  },
+
+  async listObligations(params: { status?: string; risk?: string; page?: number; pageSize?: number }) {
+    const page = params.page ?? 1;
+    const pageSize = params.pageSize ?? 10;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    let query = supabase.from('legal_obligations').select('*', { count: 'exact' }).range(from, to);
+    if (params.status) query = query.eq('status', params.status);
+    if (params.risk) query = query.eq('nd_risk_level', params.risk);
+    const { data, error, count } = await query.order('statutory_due_date', { ascending: true });
+    if (error) throw error;
+    return { data, count };
+  },
+
+  async getObligation(id: string) {
+    const { data, error } = await supabase
+      .from('legal_obligations')
+      .select('*, companies(*)')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async getObligationActions(id: string) {
+    const { data, error } = await supabase
+      .from('actions_log')
+      .select('*')
+      .eq('obligation_id', id)
+      .order('timestamp', { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  async listCompanies(params: { status?: string; risk?: string; search?: string }) {
+    let query = supabase.from('companies').select('*');
+    if (params.status) query = query.eq('status', params.status);
+    if (params.risk) query = query.eq('risk_flag', params.risk);
+    if (params.search) query = query.ilike('company_name', `%${params.search}%`);
+    const { data, error } = await query.order('company_name', { ascending: true });
+    if (error) throw error;
+    return data;
+  },
+
+  async getCompany(uen: string) {
+    const company = await supabase.from('companies').select('*').eq('uen', uen).single();
+    if (company.error) throw company.error;
+    const obligations = await supabase.from('legal_obligations').select('*').eq('company_uen', uen);
+    if (obligations.error) throw obligations.error;
+    return { company: company.data, obligations: obligations.data };
+  },
+
+  async getAuditTrail(limit = 50) {
+    const { data, error } = await supabase
+      .from('actions_log')
+      .select('*, legal_obligations(id, obligation_type, company_uen)')
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data;
+  },
 };
 

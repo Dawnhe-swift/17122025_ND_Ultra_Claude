@@ -1,35 +1,25 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AuthModule } from './auth/auth.module';
+import { SupabaseModule } from './supabase/supabase.module';
 import { CompaniesModule } from './companies/companies.module';
-import { DirectorsModule } from './directors/directors.module';
 import { ObligationsModule } from './obligations/obligations.module';
-import { UsersModule } from './users/users.module';
+import { ActionsModule } from './actions/actions.module';
+import { RiskModule } from './risk/risk.module';
+import { DocumentsModule } from './documents/documents.module';
+import { ExportModule } from './export/export.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    TypeOrmModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('POSTGRES_HOST', 'localhost'),
-        port: configService.get<number>('POSTGRES_PORT', 5432),
-        username: configService.get<string>('POSTGRES_USER', 'postgres'),
-        password: configService.get<string>('POSTGRES_PASSWORD', 'postgres'),
-        database: configService.get<string>('POSTGRES_DB', 'nd_app'),
-        synchronize: true,
-        autoLoadEntities: true,
-      }),
-    }),
-    UsersModule,
-    AuthModule,
+    SupabaseModule,
     CompaniesModule,
-    DirectorsModule,
     ObligationsModule,
+    ActionsModule,
+    RiskModule,
+    DocumentsModule,
+    ExportModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

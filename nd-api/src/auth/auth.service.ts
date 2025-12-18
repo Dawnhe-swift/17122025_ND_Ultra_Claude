@@ -1,64 +1,37 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { UsersService } from '../users/users.service';
-import { User } from '../users/user.entity';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
-import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseService } from '../supabase/supabase.service';
 
 @Injectable()
 export class AuthService {
-  constructor(
-    private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
-  ) {}
+  private readonly supabase: SupabaseClient;
 
-  async register(dto: RegisterDto) {
-    const existing = await this.usersService.findByEmail(dto.email);
-    if (existing) {
-      throw new UnauthorizedException('Email already registered');
-    }
-
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const user = await this.usersService.create({
-      ...dto,
-      password: hashedPassword,
-    });
-
-    return this.buildAuthResponse(user);
+  constructor(private readonly supabaseService: SupabaseService) {
+    this.supabase = this.supabaseService.getClient();
   }
 
-  async login(dto: LoginDto) {
-    const user = await this.usersService.findByEmail(dto.email);
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const isValid = await bcrypt.compare(dto.password, user.password);
-    if (!isValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    return this.buildAuthResponse(user);
+  async login(email: string, password: string) {
+    const { data, error } = await this.supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new HttpException(error.message, HttpStatus.UNAUTHORIZED);
+    return data;
   }
 
-  async validateUser(payload: JwtPayload): Promise<User | null> {
-    return this.usersService.findById(payload.sub);
+  async register(email: string, password: string) {
+    const { data, error } = await this.supabase.auth.signUp({ email, password });
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data;
   }
 
-  private buildAuthResponse(user: User) {
-    const tokenPayload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-    };
+  async logout() {
+    const { error } = await this.supabase.auth.signOut();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return { success: true };
+  }
 
-    const accessToken = this.jwtService.sign(tokenPayload);
-    const { password, ...safeUser } = user;
-
-    return { accessToken, user: safeUser };
+  async me() {
+    const { data, error } = await this.supabase.auth.getUser();
+    if (error) throw new HttpException(error.message, HttpStatus.UNAUTHORIZED);
+    return data;
   }
 }
 

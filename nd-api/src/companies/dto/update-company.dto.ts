@@ -1,20 +1,35 @@
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
 
 export class UpdateCompanyDto {
-  @IsString()
   @IsOptional()
-  name?: string;
-
   @IsString()
-  @IsOptional()
+  @Length(1, 10)
   uen?: string;
 
+  @IsOptional()
   @IsString()
-  @IsOptional()
-  sector?: string;
+  @MaxLength(255)
+  company_name?: string;
 
-  @IsUUID()
   @IsOptional()
-  nomineeDirectorId?: string | null;
+  @IsDateString()
+  nd_appointment_start?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fye_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  csp_contact?: string;
+
+  @IsOptional()
+  @IsIn(['active', 'dormant', 'resigned'])
+  status?: 'active' | 'dormant' | 'resigned';
+
+  @IsOptional()
+  @IsIn(['normal', 'heightened', 'exit_recommended'])
+  risk_flag?: 'normal' | 'heightened' | 'exit_recommended';
 }
 

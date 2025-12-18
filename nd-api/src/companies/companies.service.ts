@@ -1,80 +1,69 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Director } from '../directors/director.entity';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseService } from '../supabase/supabase.service';
+import { Company } from './interfaces/company.interface';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
-import { Company } from './company.entity';
 
 @Injectable()
 export class CompaniesService {
-  constructor(
-    @InjectRepository(Company)
-    private readonly companiesRepository: Repository<Company>,
-    @InjectRepository(Director)
-    private readonly directorsRepository: Repository<Director>,
-  ) {}
+  private readonly supabase: SupabaseClient;
 
-  async create(dto: CreateCompanyDto) {
-    const company = this.companiesRepository.create({
-      name: dto.name,
-      uen: dto.uen,
-      sector: dto.sector,
-    });
+  constructor(private readonly supabaseService: SupabaseService) {
+    this.supabase = this.supabaseService.getClient();
+  }
 
-    if (dto.nomineeDirectorId) {
-      company.nomineeDirector = await this.findDirectorOrFail(dto.nomineeDirectorId);
+  async findAll(filters?: { status?: string; risk_flag?: string; search?: string }): Promise<Company[]> {
+    let query = this.supabase.from('companies').select('*');
+
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters?.risk_flag) {
+      query = query.eq('risk_flag', filters.risk_flag);
+    }
+    if (filters?.search) {
+      query = query.ilike('company_name', `%${filters.search}%`);
     }
 
-    return this.companiesRepository.save(company);
+    const { data, error } = await query;
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as Company[];
   }
 
-  findAll() {
-    return this.companiesRepository.find({
-      relations: ['nomineeDirector', 'obligations', 'obligations.director'],
-      order: { name: 'ASC' },
-    });
+  async findOne(uen: string): Promise<Company | null> {
+    const { data, error } = await this.supabase.from('companies').select('*').eq('uen', uen).single();
+    if (error) throw new HttpException(error.message, HttpStatus.NOT_FOUND);
+    return data as Company;
   }
 
-  async findOne(id: string) {
-    const company = await this.companiesRepository.findOne({
-      where: { id },
-      relations: ['nomineeDirector', 'obligations', 'obligations.director'],
-    });
-    if (!company) {
-      throw new NotFoundException('Company not found');
-    }
-    return company;
+  async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
+    const { data, error } = await this.supabase.from('companies').insert(createCompanyDto).select().single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as Company;
   }
 
-  async update(id: string, dto: UpdateCompanyDto) {
-    const company = await this.findOne(id);
-
-    if (dto.nomineeDirectorId === null) {
-      company.nomineeDirector = null;
-    } else if (dto.nomineeDirectorId) {
-      company.nomineeDirector = await this.findDirectorOrFail(dto.nomineeDirectorId);
-    }
-
-    if (dto.name) company.name = dto.name;
-    if (dto.uen) company.uen = dto.uen;
-    if (dto.sector) company.sector = dto.sector;
-
-    return this.companiesRepository.save(company);
+  async update(uen: string, updateCompanyDto: UpdateCompanyDto): Promise<Company> {
+    const payload = { ...updateCompanyDto, updated_at: new Date().toISOString() };
+    const { data, error } = await this.supabase
+      .from('companies')
+      .update(payload)
+      .eq('uen', uen)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as Company;
   }
 
-  async remove(id: string) {
-    const company = await this.findOne(id);
-    await this.companiesRepository.remove(company);
-    return { success: true };
-  }
-
-  private async findDirectorOrFail(id: string) {
-    const director = await this.directorsRepository.findOne({ where: { id } });
-    if (!director) {
-      throw new NotFoundException('Nominee director not found');
-    }
-    return director;
+  async softDelete(uen: string): Promise<Company> {
+    const { data, error } = await this.supabase
+      .from('companies')
+      .update({ status: 'resigned', updated_at: new Date().toISOString() })
+      .eq('uen', uen)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as Company;
   }
 }
 

@@ -1,13 +1,11 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Company } from '../companies/company.entity';
-import { Director } from '../directors/director.entity';
-import { Obligation } from './obligation.entity';
-import { ObligationsController } from './obligations.controller';
 import { ObligationsService } from './obligations.service';
+import { ObligationsController } from './obligations.controller';
+import { SupabaseModule } from '../supabase/supabase.module';
+import { ActionsModule } from '../actions/actions.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Obligation, Company, Director])],
+  imports: [SupabaseModule, ActionsModule],
   controllers: [ObligationsController],
   providers: [ObligationsService],
   exports: [ObligationsService],

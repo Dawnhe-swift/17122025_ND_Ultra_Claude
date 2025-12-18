@@ -1,31 +1,26 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CreateObligationDto } from './dto/create-obligation.dto';
-import { UpdateObligationDto } from './dto/update-obligation.dto';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ObligationsService } from './obligations.service';
+import { CreateObligationDto } from './dto/create-obligation.dto';
+import { ReviewObligationDto } from './dto/review-obligation.dto';
+import { CloseObligationDto } from './dto/close-obligation.dto';
 
-@UseGuards(JwtAuthGuard)
 @Controller('obligations')
 export class ObligationsController {
   constructor(private readonly obligationsService: ObligationsService) {}
 
-  @Post()
-  create(@Body() dto: CreateObligationDto) {
-    return this.obligationsService.create(dto);
+  @Get()
+  findAll(@Query('status') status?: string, @Query('company_uen') company_uen?: string, @Query('risk') risk?: string) {
+    return this.obligationsService.findAll({ status, company_uen, risk });
   }
 
-  @Get()
-  findAll() {
-    return this.obligationsService.findAll();
+  @Get('/overdue')
+  findOverdue() {
+    return this.obligationsService.findOverdue();
+  }
+
+  @Get('/high-risk')
+  findHighRisk() {
+    return this.obligationsService.findHighRisk();
   }
 
   @Get(':id')
@@ -33,14 +28,34 @@ export class ObligationsController {
     return this.obligationsService.findOne(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateObligationDto) {
-    return this.obligationsService.update(id, dto);
+  @Post()
+  create(@Body() createDto: CreateObligationDto) {
+    return this.obligationsService.createObligation(createDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.obligationsService.remove(id);
+  @Post(':id/review')
+  review(@Param('id') id: string, @Body() reviewDto: ReviewObligationDto) {
+    return this.obligationsService.reviewObligation(id, reviewDto);
+  }
+
+  @Post(':id/approve')
+  approve(@Param('id') id: string, @Body('ndNotes') ndNotes: string) {
+    return this.obligationsService.approveObligation(id, ndNotes);
+  }
+
+  @Post(':id/reject')
+  reject(@Param('id') id: string, @Body('ndNotes') ndNotes: string) {
+    return this.obligationsService.rejectObligation(id, ndNotes);
+  }
+
+  @Post(':id/escalate')
+  escalate(@Param('id') id: string, @Body('ndNotes') ndNotes: string) {
+    return this.obligationsService.escalateObligation(id, ndNotes);
+  }
+
+  @Post(':id/close')
+  close(@Param('id') id: string, @Body() closeDto: CloseObligationDto) {
+    return this.obligationsService.closeObligation(id, closeDto);
   }
 }
 

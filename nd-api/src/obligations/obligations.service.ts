@@ -1,98 +1,158 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Company } from '../companies/company.entity';
-import { Director } from '../directors/director.entity';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseService } from '../supabase/supabase.service';
+import { ActionsService } from '../actions/actions.service';
 import { CreateObligationDto } from './dto/create-obligation.dto';
-import { UpdateObligationDto } from './dto/update-obligation.dto';
-import { Obligation, ObligationStatus } from './obligation.entity';
+import { ReviewObligationDto } from './dto/review-obligation.dto';
+import { CloseObligationDto } from './dto/close-obligation.dto';
+import { LegalObligation } from './interfaces/legal-obligation.interface';
+import { ObligationStatus } from './enums/obligation-status.enum';
+import { RiskLevel } from './enums/risk-level.enum';
 
 @Injectable()
 export class ObligationsService {
+  private readonly supabase: SupabaseClient;
+
   constructor(
-    @InjectRepository(Obligation)
-    private readonly obligationsRepository: Repository<Obligation>,
-    @InjectRepository(Company)
-    private readonly companiesRepository: Repository<Company>,
-    @InjectRepository(Director)
-    private readonly directorsRepository: Repository<Director>,
-  ) {}
+    private readonly supabaseService: SupabaseService,
+    private readonly actionsService: ActionsService,
+  ) {
+    this.supabase = this.supabaseService.getClient();
+  }
 
-  async create(dto: CreateObligationDto) {
-    const company = await this.findCompanyOrFail(dto.companyId);
-    const director = dto.directorId
-      ? await this.findDirectorOrFail(dto.directorId)
-      : null;
+  async findAll(filters?: { status?: string; company_uen?: string; risk?: string }): Promise<LegalObligation[]> {
+    let query = this.supabase.from('legal_obligations').select('*');
 
-    const obligation = this.obligationsRepository.create({
-      title: dto.title,
-      description: dto.description,
-      category: dto.category,
-      dueDate: new Date(dto.dueDate),
-      status: dto.status ?? ObligationStatus.PENDING,
-      company,
-      director,
+    if (filters?.status) query = query.eq('status', filters.status);
+    if (filters?.company_uen) query = query.eq('company_uen', filters.company_uen);
+    if (filters?.risk) query = query.eq('nd_risk_level', filters.risk);
+
+    const { data, error } = await query;
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as LegalObligation[];
+  }
+
+  async findOne(id: string): Promise<LegalObligation> {
+    const { data, error } = await this.supabase.from('legal_obligations').select('*').eq('id', id).single();
+    if (error) throw new HttpException(error.message, HttpStatus.NOT_FOUND);
+    return data as LegalObligation;
+  }
+
+  async findOverdue(): Promise<LegalObligation[]> {
+    const today = new Date().toISOString();
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .select('*')
+      .lt('statutory_due_date', today)
+      .in('status', [ObligationStatus.OPEN, ObligationStatus.IN_PROGRESS]);
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as LegalObligation[];
+  }
+
+  async findHighRisk(): Promise<LegalObligation[]> {
+    const { data, error } = await this.supabase.from('legal_obligations').select('*').eq('nd_risk_level', 'high');
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    return data as LegalObligation[];
+  }
+
+  async createObligation(createObligationDto: CreateObligationDto): Promise<LegalObligation> {
+    const payload = {
+      ...createObligationDto,
+      status: createObligationDto.status ?? ObligationStatus.OPEN,
+      nd_risk_level: createObligationDto.nd_risk_level ?? RiskLevel.LOW,
+    };
+    const { data, error } = await this.supabase.from('legal_obligations').insert(payload).select().single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(data.id, 'created', 'nd', undefined, undefined, undefined, {
+      status: data.status,
     });
-
-    return this.obligationsRepository.save(obligation);
+    return data as LegalObligation;
   }
 
-  findAll() {
-    return this.obligationsRepository.find({
-      relations: ['company', 'director'],
-      order: { dueDate: 'ASC' },
+  async reviewObligation(id: string, reviewDto: ReviewObligationDto): Promise<LegalObligation> {
+    if (!reviewDto.ndNotes) {
+      throw new HttpException('ndNotes is required', HttpStatus.BAD_REQUEST);
+    }
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .update({
+        status: ObligationStatus.IN_PROGRESS,
+        red_flag_checklist: reviewDto.redFlagChecklist,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(id, 'reviewed', 'nd', reviewDto.ndNotes, undefined, undefined, {
+      status: ObligationStatus.IN_PROGRESS,
     });
+    return data as LegalObligation;
   }
 
-  async findOne(id: string) {
-    const obligation = await this.obligationsRepository.findOne({
-      where: { id },
-      relations: ['company', 'director'],
+  async approveObligation(id: string, ndNotes: string): Promise<LegalObligation> {
+    if (!ndNotes) throw new HttpException('ndNotes is required', HttpStatus.BAD_REQUEST);
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .update({ status: ObligationStatus.COMPLETED, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(id, 'approved', 'nd', ndNotes, undefined, undefined, {
+      status: ObligationStatus.COMPLETED,
     });
-    if (!obligation) {
-      throw new NotFoundException('Obligation not found');
-    }
-    return obligation;
+    return data as LegalObligation;
   }
 
-  async update(id: string, dto: UpdateObligationDto) {
-    const obligation = await this.findOne(id);
-
-    if (dto.companyId) {
-      obligation.company = await this.findCompanyOrFail(dto.companyId);
-    }
-
-    if (dto.directorId === null) {
-      obligation.director = null;
-    } else if (dto.directorId) {
-      obligation.director = await this.findDirectorOrFail(dto.directorId);
-    }
-
-    if (dto.title) obligation.title = dto.title;
-    if (dto.description) obligation.description = dto.description;
-    if (dto.category) obligation.category = dto.category;
-    if (dto.dueDate) obligation.dueDate = new Date(dto.dueDate);
-    if (dto.status) obligation.status = dto.status;
-
-    return this.obligationsRepository.save(obligation);
+  async rejectObligation(id: string, ndNotes: string): Promise<LegalObligation> {
+    if (!ndNotes) throw new HttpException('ndNotes is required', HttpStatus.BAD_REQUEST);
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .update({ status: ObligationStatus.RESIGNED_UNRESOLVED, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(id, 'rejected', 'nd', ndNotes, undefined, undefined, {
+      status: ObligationStatus.RESIGNED_UNRESOLVED,
+    });
+    return data as LegalObligation;
   }
 
-  async remove(id: string) {
-    const obligation = await this.findOne(id);
-    await this.obligationsRepository.remove(obligation);
-    return { success: true };
+  async escalateObligation(id: string, ndNotes: string): Promise<LegalObligation> {
+    if (!ndNotes) throw new HttpException('ndNotes is required', HttpStatus.BAD_REQUEST);
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .update({ status: ObligationStatus.ESCALATED, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(id, 'escalated', 'nd', ndNotes, undefined, undefined, {
+      status: ObligationStatus.ESCALATED,
+    });
+    return data as LegalObligation;
   }
 
-  private async findCompanyOrFail(id: string) {
-    const company = await this.companiesRepository.findOne({ where: { id } });
-    if (!company) throw new NotFoundException('Company not found');
-    return company;
-  }
-
-  private async findDirectorOrFail(id: string) {
-    const director = await this.directorsRepository.findOne({ where: { id } });
-    if (!director) throw new NotFoundException('Director not found');
-    return director;
+  async closeObligation(id: string, closeDto: CloseObligationDto): Promise<LegalObligation> {
+    if (!closeDto.ndDecisionSummary) throw new HttpException('ndDecisionSummary is required', HttpStatus.BAD_REQUEST);
+    if (!closeDto.ndNotes) throw new HttpException('ndNotes is required', HttpStatus.BAD_REQUEST);
+    const { data, error } = await this.supabase
+      .from('legal_obligations')
+      .update({
+        status: ObligationStatus.COMPLETED,
+        nd_decision_summary: closeDto.ndDecisionSummary,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+    await this.actionsService.logAction(id, 'closed', 'nd', closeDto.ndNotes, undefined, undefined, {
+      status: ObligationStatus.COMPLETED,
+    });
+    return data as LegalObligation;
   }
 }
 

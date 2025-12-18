@@ -1,30 +1,35 @@
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
-import { ObligationStatus } from '../obligation.entity';
+import { IsDateString, IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateObligationDto {
   @IsString()
-  title: string;
+  @MaxLength(10)
+  company_uen: string;
 
   @IsString()
-  @IsOptional()
-  description?: string;
-
-  @IsString()
-  @IsOptional()
-  category?: string;
+  @MaxLength(50)
+  obligation_type: string;
 
   @IsDateString()
-  dueDate: string;
+  statutory_due_date: string;
 
-  @IsEnum(ObligationStatus)
   @IsOptional()
-  status?: ObligationStatus;
+  @IsIn(['auto', 'email', 'letter'])
+  trigger_source?: 'auto' | 'email' | 'letter';
 
-  @IsUUID()
-  companyId: string;
-
-  @IsUUID()
   @IsOptional()
-  directorId?: string;
+  @IsIn(['open', 'in_progress', 'completed', 'overdue', 'escalated', 'resigned_unresolved'])
+  status?: string;
+
+  @IsOptional()
+  @IsIn(['low', 'medium', 'high'])
+  nd_risk_level?: string;
+
+  @IsOptional()
+  @IsString()
+  nd_decision_summary?: string;
+
+  @IsOptional()
+  @IsObject()
+  red_flag_checklist?: Record<string, unknown>;
 }
 

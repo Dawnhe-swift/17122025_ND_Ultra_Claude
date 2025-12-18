@@ -1,46 +1,39 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 
-@UseGuards(JwtAuthGuard)
 @Controller('companies')
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
-  @Post()
-  create(@Body() dto: CreateCompanyDto) {
-    return this.companiesService.create(dto);
-  }
-
   @Get()
-  findAll() {
-    return this.companiesService.findAll();
+  findAll(
+    @Query('status') status?: string,
+    @Query('risk_flag') risk_flag?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.companiesService.findAll({ status, risk_flag, search });
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.companiesService.findOne(id);
+  @Get(':uen')
+  findOne(@Param('uen') uen: string) {
+    return this.companiesService.findOne(uen);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
-    return this.companiesService.update(id, dto);
+  @Post()
+  create(@Body() createCompanyDto: CreateCompanyDto) {
+    return this.companiesService.create(createCompanyDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.companiesService.remove(id);
+  @Patch(':uen')
+  update(@Param('uen') uen: string, @Body() updateCompanyDto: UpdateCompanyDto) {
+    return this.companiesService.update(uen, updateCompanyDto);
+  }
+
+  @Delete(':uen')
+  remove(@Param('uen') uen: string) {
+    return this.companiesService.softDelete(uen);
   }
 }
 
