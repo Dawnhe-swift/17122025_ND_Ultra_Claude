@@ -7,3 +7,4 @@ import { SupabaseService } from './supabase.service';
 })
 export class SupabaseModule {}
 
+

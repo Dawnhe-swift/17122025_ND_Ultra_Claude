@@ -30,3 +30,4 @@ export class CreateCompanyDto {
   risk_flag?: 'normal' | 'heightened' | 'exit_recommended';
 }
 
+

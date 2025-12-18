@@ -106,3 +106,4 @@ create policy "Users can insert documents" on public.documents
 
 commit;
 
+

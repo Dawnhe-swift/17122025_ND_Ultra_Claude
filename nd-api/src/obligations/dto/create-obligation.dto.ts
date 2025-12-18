@@ -33,3 +33,4 @@ export class CreateObligationDto {
   red_flag_checklist?: Record<string, unknown>;
 }
 
+

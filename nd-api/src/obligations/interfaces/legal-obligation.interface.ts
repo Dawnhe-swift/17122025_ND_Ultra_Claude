@@ -16,3 +16,4 @@ export interface LegalObligation {
   updated_at?: string;
 }
 
+
