@@ -18,10 +18,47 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-    if (authError) setError(authError.message);
-    setBusy(false);
-    if (!authError) router.push('/');
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (authError) {
+        console.error('[nd-ui] Login failed (Supabase auth error)', authError);
+        setError(authError.message);
+        return;
+      }
+
+      if (!data.session) {
+        const noSessionErr = new Error('[nd-ui] Login succeeded but no session was returned.');
+        console.error(noSessionErr);
+        console.error(noSessionErr.stack);
+        setError('Login succeeded but no session was returned. See console for details.');
+        return;
+      }
+
+      router.push('/');
+    } catch (err) {
+      // This catches low-level network errors like: TypeError: Failed to fetch
+      console.error('[nd-ui] Login failed (exception thrown)', err);
+      if (err instanceof Error) {
+        console.error(err.stack);
+      }
+
+      const details =
+        err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ''}` : String(err);
+      const looksLikeDnsFailure = /(ERR_NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo|EAI_AGAIN|dns|name not resolved)/i.test(
+        details,
+      );
+
+      setError(
+        looksLikeDnsFailure
+          ? 'Login failed because the Supabase domain could not be resolved (DNS). If you are using local Supabase, restart the Supabase database/services and try again. See console for details.'
+          : err instanceof Error
+            ? `${err.name}: ${err.message} (see browser console for stack trace)`
+            : 'Login failed (unknown error). See browser console for details.',
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (loading) {
